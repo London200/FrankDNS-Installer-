@@ -1,10 +1,28 @@
 #!/bin/bash
 
 # ==============================================================================
-#  FRANKDNS+ 2026 - MODULAR SYSTEM INSTALLER (v3.1.0)
+#  FRANKDNS+ 2026 - MODULAR SYSTEM INSTALLER (v3.4.0)
 #  ARCHITEKTÚRA: Modular Go (cmd/internal layout)
-#  MÓDOSÍTÁS DÁTUMA: 2025-12-11
+#  MÓDOSÍTÁS DÁTUMA: 2025-12-12
 #  INSTALL DIR: /home/robot_36/frankdnsplus
+#  
+#  JAVÍTÁSOK v3.4.0:
+#    ✓ TLS biztonság (tanúsítvány ellenőrzés)
+#    ✓ Blocklist védelem (üres adatbázis elleni védelem)
+#    ✓ Környezeti változó támogatás config path-hoz
+#    ✓ DNS cache key javítás (Qclass támogatás)
+#    ✓ Cache törlés szűrőlista frissítéskor
+#    ✓ Duplikáció megelőzés
+#    ✓ Real-time statisztika
+#    ✓ Részletes loggolás
+#    ✓ FTP/SSH konfig duplikáció megelőzés
+#    ✓ JavaScript böngésző-kompatibilitás
+#    ✓ Összes BE/KI gombok szűrőlistákhoz
+#    ✓ Domain számláló minden listánál
+#    ✓ Összesítő panel
+#    ✓ ÚJ: AdGuard whitelist (@@) támogatás
+#    ✓ ÚJ: URL path kezelés (youtube.com/api/... -> youtube.com)
+#    ✓ ÚJ: Szekció fejléc (=====) kihagyás
 # ==============================================================================
 
 RED='\033[0;31m'
@@ -22,7 +40,7 @@ fi
 show_main_menu() {
     clear
     echo -e "${BLUE}############################################################${NC}"
-    echo -e "${BLUE}#${NC}       ${BOLD}FRANKDNS+ 2026 - MODULAR SYSTEM v3.1${NC}       ${BLUE}#${NC}"
+    echo -e "${BLUE}#${NC}       ${BOLD}FRANKDNS+ 2026 - MODULAR SYSTEM v3.4.0${NC}       ${BLUE}#${NC}"
     echo -e "${BLUE}############################################################${NC}"
     echo ""
     echo -e "  ${YELLOW}1)${NC} 🚀 TELEPÍTÉS / JAVÍTÁS (Modular Engine)"
@@ -33,9 +51,13 @@ show_main_menu() {
     echo ""
     echo -e "  ${YELLOW}3)${NC} 🎛️  VEZÉRLŐPULT (Logok, Restart)"
     echo ""
-    echo -e "  ${YELLOW}4)${NC} 🚪 Kilépés"
+    echo -e "  ${YELLOW}4)${NC} 📁 FTP beállítások (root login engedélyezése)"
     echo ""
-    read -p "Mit szeretnél tenni? (1-4): " choice
+    echo -e "  ${YELLOW}5)${NC} 🔧 Jogosultság javítás"
+    echo ""
+    echo -e "  ${YELLOW}6)${NC} 🚪 Kilépés"
+    echo ""
+    read -p "Mit szeretnél tenni? (1-6): " choice
 
     case $choice in
         1)
@@ -55,9 +77,195 @@ show_main_menu() {
                 echo -e "\n${RED}❌ A FrankDNS nincs telepítve!${NC}"; sleep 2; show_main_menu
             fi
             ;;
-        4) echo -e "\nViszlát!"; exit 0 ;;
-        *) show_main_menu ;;
+        4)
+            configure_ftp
+            ;;
+        5)
+            fix_permissions
+            ;;
+        6) 
+            echo -e "\nViszlát!"; exit 0 ;;
+        *) 
+            show_main_menu ;;
     esac
+}
+
+configure_ftp() {
+    clear
+    echo -e "${BLUE}############################################################${NC}"
+    echo -e "${BLUE}#${NC}       ${BOLD}FTP BEÁLLÍTÁSOK${NC}       ${BLUE}#${NC}"
+    echo -e "${BLUE}############################################################${NC}"
+    echo ""
+    
+    echo "🔍 FTP szerverek keresése..."
+    
+    # vsftpd ellenőrzés
+    if systemctl is-active --quiet vsftpd 2>/dev/null || dpkg -l | grep -q vsftpd; then
+        echo -e "✅ vsftpd szerver észlelve"
+        echo ""
+        echo -e "${YELLOW}vsftpd beállítása:${NC}"
+        echo "1) Root login engedélyezése vsftpd-ben"
+        echo "2) Vissza a menübe"
+        read -p "Válassz: " ftp_choice
+        
+        if [ "$ftp_choice" = "1" ]; then
+            echo -e "\n🔧 vsftpd konfiguráció módosítása..."
+            # vsftpd konfiguráció mentése
+            if [ -f "/etc/vsftpd.conf" ]; then
+                cp /etc/vsftpd.conf /etc/vsftpd.conf.backup
+                echo "💾 vsftpd konfiguráció mentve: /etc/vsftpd.conf.backup"
+                
+                # Root login engedélyezése
+                sed -i 's/^#root_login/root_login/' /etc/vsftpd.conf 2>/dev/null
+                sed -i 's/^root_login=NO/root_login=YES/' /etc/vsftpd.conf 2>/dev/null
+                sed -i 's/^local_enable=NO/local_enable=YES/' /etc/vsftpd.conf 2>/dev/null
+                # Csak akkor adjuk hozzá, ha még nincs benne
+                grep -q "^local_enable=YES" /etc/vsftpd.conf || echo "local_enable=YES" >> /etc/vsftpd.conf
+                grep -q "^write_enable=YES" /etc/vsftpd.conf || echo "write_enable=YES" >> /etc/vsftpd.conf
+                
+                systemctl restart vsftpd 2>/dev/null
+                echo -e "${GREEN}✅ vsftpd root login engedélyezve${NC}"
+            else
+                echo -e "${RED}❌ /etc/vsftpd.conf nem található${NC}"
+            fi
+        fi
+    fi
+    
+    # proftpd ellenőrzés
+    if systemctl is-active --quiet proftpd 2>/dev/null || dpkg -l | grep -q proftpd; then
+        echo -e "\n✅ proftpd szerver észlelve"
+        echo ""
+        echo -e "${YELLOW}proftpd beállítása:${NC}"
+        echo "1) Root login engedélyezése proftpd-ben"
+        echo "2) Vissza a menübe"
+        read -p "Válassz: " proftpd_choice
+        
+        if [ "$proftpd_choice" = "1" ]; then
+            echo -e "\n🔧 proftpd konfiguráció módosítása..."
+            if [ -f "/etc/proftpd/proftpd.conf" ]; then
+                cp /etc/proftpd/proftpd.conf /etc/proftpd/proftpd.conf.backup
+                echo "💾 proftpd konfiguráció mentve: /etc/proftpd/proftpd.conf.backup"
+                
+                # Root login engedélyezése - csak ha még nincs benne
+                if ! grep -q "AllowUser root" /etc/proftpd/proftpd.conf; then
+                    echo "<Limit LOGIN>" >> /etc/proftpd/proftpd.conf
+                    echo "    AllowUser root" >> /etc/proftpd/proftpd.conf
+                    echo "</Limit>" >> /etc/proftpd/proftpd.conf
+                fi
+                
+                systemctl restart proftpd 2>/dev/null
+                echo -e "${GREEN}✅ proftpd root login engedélyezve${NC}"
+            else
+                echo -e "${RED}❌ /etc/proftpd/proftpd.conf nem található${NC}"
+            fi
+        fi
+    fi
+    
+    # sshd ellenőrzés
+    if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null || dpkg -l | grep -q openssh-server; then
+        echo -e "\n✅ SSH szerver észlelve"
+        echo ""
+        echo -e "${YELLOW}SSH beállítása:${NC}"
+        echo "1) Root login engedélyezése SSH-n keresztül"
+        echo "2) Vissza a menübe"
+        read -p "Válassz: " ssh_choice
+        
+        if [ "$ssh_choice" = "1" ]; then
+            echo -e "\n🔧 SSH konfiguráció módosítása..."
+            if [ -f "/etc/ssh/sshd_config" ]; then
+                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+                echo "💾 SSH konfiguráció mentve: /etc/ssh/sshd_config.backup"
+                
+                # Root login engedélyezése
+                sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null
+                sed -i 's/^PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null
+                sed -i 's/^PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null
+                
+                systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
+                echo -e "${GREEN}✅ SSH root login engedélyezve${NC}"
+            else
+                echo -e "${RED}❌ /etc/ssh/sshd_config nem található${NC}"
+            fi
+        fi
+    fi
+    
+    # Ha egyik FTP szerver sem található
+    if ! (systemctl is-active --quiet vsftpd 2>/dev/null || systemctl is-active --quiet proftpd 2>/dev/null || \
+          systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null || \
+          dpkg -l | grep -q vsftpd || dpkg -l | grep -q proftpd || dpkg -l | grep -q openssh-server); then
+        echo -e "${RED}❌ Nem található telepített FTP/SSH szerver${NC}"
+        echo ""
+        echo "Telepíthetsz egyet az alábbi parancsokkal:"
+        echo "  vsftpd: apt-get install vsftpd"
+        echo "  proftpd: apt-get install proftpd"
+        echo "  SSH: apt-get install openssh-server"
+    fi
+    
+    echo ""
+    read -p "Nyomj Entert a menübe való visszatéréshez..."
+    show_main_menu
+}
+
+fix_permissions() {
+    clear
+    echo -e "${BLUE}############################################################${NC}"
+    echo -e "${BLUE}#${NC}       ${BOLD}JOGOSULTSÁG JAVÍTÁS${NC}       ${BLUE}#${NC}"
+    echo -e "${BLUE}############################################################${NC}"
+    echo ""
+    
+    echo "🔧 Jogosultságok javítása..."
+    echo ""
+    
+    if id "robot_36" &>/dev/null; then
+        echo "Felhasználó: robot_36"
+        echo "Könyvtár: /home/robot_36"
+        echo ""
+        
+        echo "Parancsok végrehajtása:"
+        echo "  sudo chown -R robot_36:robot_36 /home/robot_36"
+        echo "  sudo chmod -R 755 /home/robot_36"
+        echo ""
+        
+        read -p "Folytatod? (i/n): " confirm
+        if [ "$confirm" = "i" ] || [ "$confirm" = "I" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            echo ""
+            echo "🏃‍♂️ Jogosultságok módosítása folyamatban..."
+            
+            # Jogosultságok javítása
+            chown -R robot_36:robot_36 /home/robot_36
+            chmod -R 755 /home/robot_36
+            
+            # FrankDNS+ specifikus könyvtárak
+            if [ -d "/home/robot_36/frankdnsplus" ]; then
+                echo "FrankDNS+ könyvtár jogosultságok ellenőrzése..."
+                chown -R robot_36:robot_36 /home/robot_36/frankdnsplus
+                find /home/robot_36/frankdnsplus -type f -exec chmod 644 {} \;
+                find /home/robot_36/frankdnsplus -type d -exec chmod 755 {} \;
+                
+                # Bináris fájlok írásvédetté tétele
+                if [ -f "/home/robot_36/frankdnsplus/main" ]; then
+                    chmod +x /home/robot_36/frankdnsplus/main
+                fi
+            fi
+            
+            echo -e "${GREEN}✅ Jogosultságok javítva${NC}"
+            echo ""
+            echo "A /home/robot_36 könyvtár most:"
+            echo "  Tulajdonos: robot_36:robot_36"
+            echo "  Jogosultság: 755 (rwxr-xr-x)"
+        else
+            echo -e "${YELLOW}⏹️ Művelet megszakítva${NC}"
+        fi
+    else
+        echo -e "${RED}❌ A robot_36 felhasználó nem létezik${NC}"
+        echo ""
+        echo "Hozd létre a felhasználót:"
+        echo "  sudo useradd -m robot_36"
+    fi
+    
+    echo ""
+    read -p "Nyomj Entert a menübe való visszatéréshez..."
+    show_main_menu
 }
 
 run_installer() {
@@ -187,8 +395,16 @@ import (
 var (
 	Instance *Config
 	Mutex    sync.RWMutex
-	Path     = "/home/robot_36/frankdnsplus/config.json"
+	Path     string
 )
+
+func init() {
+	// Környezeti változóból vagy alapértelmezettből
+	Path = os.Getenv("FRANKDNS_CONFIG_PATH")
+	if Path == "" {
+		Path = "/home/robot_36/frankdnsplus/config.json"
+	}
+}
 
 // BlocklistConfig defines a single external blocklist source
 type BlocklistConfig struct {
@@ -287,7 +503,7 @@ func Default() Config {
 		Blocklists: []BlocklistConfig{
 			{
 				Name:    "FRANK SUPERBLOCK — ULTRA+ 2026",
-				URL:     "https://raw.githubusercontent.com/London200/FRANK-SUPERBLOCK-ULTRA-2026/main/HEAD/FRANK%20SUPERBLOCK%20ULTRA%202026%20DNS%20v29.12.2026.txt",
+				URL:     "https://raw.githubusercontent.com/London200/FRANK-SUPERBLOCK-ULTRA-2026/refs/heads/main/ALL_DOMAINS_categorized.txt",
 				Enabled: true,
 			},
 			{
@@ -400,7 +616,7 @@ func New() *Store {
 
 // Get retrieves a cached response if valid
 func (s *Store) Get(question dns.Question) *dns.Msg {
-	key := fmt.Sprintf("%s:%d", question.Name, question.Qtype)
+	key := fmt.Sprintf("%s:%d:%d", question.Name, question.Qtype, question.Qclass)
 
 	s.mutex.RLock()
 	entry, found := s.items[key]
@@ -430,7 +646,7 @@ func (s *Store) Set(question dns.Question, msg *dns.Msg) {
 		return
 	}
 
-	key := fmt.Sprintf("%s:%d", question.Name, question.Qtype)
+	key := fmt.Sprintf("%s:%d:%d", question.Name, question.Qtype, question.Qclass)
 
 	s.mutex.Lock()
 	s.items[key] = Entry{
@@ -457,6 +673,13 @@ func (s *Store) Cleanup() {
 	}
 }
 
+// Clear removes all entries from cache (used when blocklist updates)
+func (s *Store) Clear() {
+	s.mutex.Lock()
+	s.items = make(map[string]Entry)
+	s.mutex.Unlock()
+}
+
 // StartCleanupRoutine runs the cleanup in a goroutine
 func StartCleanupRoutine() {
 	go Global.Cleanup()
@@ -470,6 +693,7 @@ package blocklist
 import (
 	"bufio"
 	"frankdnsplus/internal/config"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -483,8 +707,10 @@ type Manager struct {
 	BlockMap      map[string]struct{}
 	WhitelistMap  map[string]struct{}
 	BlacklistMap  map[string]struct{}
+	ListCounts    map[string]int // Domain count per URL
 	Mutex         sync.RWMutex
 	StatsDatabase uint64
+	LastUpdate    time.Time
 }
 
 // Global instance
@@ -492,43 +718,103 @@ var Global = &Manager{
 	BlockMap:     make(map[string]struct{}),
 	WhitelistMap: make(map[string]struct{}),
 	BlacklistMap: make(map[string]struct{}),
+	ListCounts:   make(map[string]int),
+	LastUpdate:   time.Now(),
 }
 
 // Update downloads and parses all enabled blocklists
 func (m *Manager) Update() {
+	log.Printf("[BLOCKLIST] Frissítés indítása...")
+	
+	// 1️⃣ ÚJ ADATBÁZIS ELŐKÉSZÍTÉSE (teljesen üres, nincs duplikáció)
 	newBlockMap := make(map[string]struct{})
+	newWhitelistFromLists := make(map[string]struct{})
+	newListCounts := make(map[string]int)
+	successCount := 0
+	errorCount := 0
+	enabledCount := 0
 
 	config.Mutex.RLock()
 	lists := config.Instance.Blocklists
 	config.Mutex.RUnlock()
 
-	client := http.Client{Timeout: 15 * time.Second}
+	client := http.Client{Timeout: 30 * time.Second}
 
+	// 3️⃣ KIZÁRÓLAG AZ AKTUÁLIS SZŰRŐLISTÁK LETÖLTÉSE
 	for _, list := range lists {
 		if !list.Enabled {
 			continue
 		}
+		enabledCount++
 
+		log.Printf("[BLOCKLIST] Letöltés: %s", list.Name)
 		resp, err := client.Get(list.URL)
 		if err != nil {
+			log.Printf("[BLOCKLIST] ❌ Hiba a lista letöltésekor (%s): %v", list.Name, err)
+			errorCount++
+			continue
+		}
+		
+		if resp.StatusCode != 200 {
+			log.Printf("[BLOCKLIST] ❌ HTTP hiba (%s): %d", list.Name, resp.StatusCode)
+			resp.Body.Close()
+			errorCount++
 			continue
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
 		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
+		scanner.Buffer(buf, 2*1024*1024) // 2MB buffer a nagy listákhoz
+		
+		lineCount := 0
+		domainCount := 0
+		whitelistCount := 0
 
 		for scanner.Scan() {
-			domain := parseLine(scanner.Text())
-			if domain != "" {
-				newBlockMap[domain] = struct{}{}
+			lineCount++
+			rawLine := scanner.Text()
+			
+			// Whitelist sorok kezelése (@@||domain^)
+			if strings.HasPrefix(strings.TrimSpace(rawLine), "@@") {
+				wlDomains := parseWhitelistLine(rawLine)
+				for _, domain := range wlDomains {
+					if domain != "" {
+						newWhitelistFromLists[domain] = struct{}{}
+						whitelistCount++
+					}
+				}
+				continue
+			}
+			
+			// Block sorok kezelése
+			domains := parseLine(rawLine)
+			for _, domain := range domains {
+				if domain != "" {
+					newBlockMap[domain] = struct{}{}
+					domainCount++
+				}
 			}
 		}
 		resp.Body.Close()
+		
+		if err := scanner.Err(); err != nil {
+			log.Printf("[BLOCKLIST] ⚠️ Olvasási hiba (%s): %v", list.Name, err)
+		}
+		
+		// Domain számláló tárolása ehhez az URL-hez
+		newListCounts[list.URL] = domainCount
+		
+		successCount++
+		log.Printf("[BLOCKLIST] ✅ %s: %d sor, %d block, %d whitelist", list.Name, lineCount, domainCount, whitelistCount)
 	}
 
 	newWhitelist := make(map[string]struct{})
 	newBlacklist := make(map[string]struct{})
+	
+	// Listákból származó whitelist hozzáadása
+	for domain := range newWhitelistFromLists {
+		newWhitelist[domain] = struct{}{}
+	}
 
 	defaults := []string{
 		"facebook.com", "facebook.net", "fbcdn.net", "fbsbx.com",
@@ -553,13 +839,37 @@ func (m *Manager) Update() {
 	}
 	config.Mutex.RUnlock()
 
+	// 4️⃣ VÉDELEM: ha egyetlen lista sem töltődött be sikeresen
+	if enabledCount > 0 && successCount == 0 {
+		log.Printf("[BLOCKLIST] ❌ HIBA: Egyetlen lista sem töltődött be! Régi adatbázis marad aktív.")
+		return
+	}
+	
+	// Ha nincs engedélyezett lista
+	if enabledCount == 0 {
+		log.Printf("[BLOCKLIST] ⚠️ Nincs engedélyezett szűrőlista!")
+	}
+
+	// 5️⃣ RÉGI ADATBÁZIS TELJES TÖRLÉSE ÉS ÚJ AKTIVÁLÁSA
 	m.Mutex.Lock()
+	// Explicit törlés a régi map-ből (GC segítése)
+	for k := range m.BlockMap {
+		delete(m.BlockMap, k)
+	}
+	// Új adatok beállítása
 	m.BlockMap = newBlockMap
 	m.WhitelistMap = newWhitelist
 	m.BlacklistMap = newBlacklist
+	m.ListCounts = newListCounts
+	m.LastUpdate = time.Now()
 	m.Mutex.Unlock()
 
+	// Statisztika azonnali frissítése
 	atomic.StoreUint64(&m.StatsDatabase, uint64(len(newBlockMap)))
+	
+	log.Printf("[BLOCKLIST] ✅ Frissítés kész!")
+	log.Printf("[BLOCKLIST] 📊 Összesen: %d domain | Sikeres listák: %d/%d | Hibás: %d", 
+		len(newBlockMap), successCount, enabledCount, errorCount)
 }
 
 // StartUpdateLoop runs the update periodically
@@ -572,57 +882,199 @@ func StartUpdateLoop() {
 	}
 }
 
-func parseLine(line string) string {
+func parseLine(line string) []string {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
-		return ""
+		return nil
+	}
+	
+	// Skip section headers (=====)
+	if strings.HasPrefix(line, "=") {
+		return nil
 	}
 
+	// Remove inline comments
 	if idx := strings.Index(line, "#"); idx != -1 {
 		line = strings.TrimSpace(line[:idx])
 	}
 
-	if strings.HasPrefix(line, "||") {
-		line = strings.TrimPrefix(line, "||")
-		if idx := strings.IndexAny(line, "^/"); idx != -1 {
-			line = line[:idx]
-		}
-		return cleanDomain(line)
+	var domains []string
+
+	// AdGuard Whitelist format: @@||domain^
+	// Ezeket KÜLÖN kezeljük a whitelist-ben, nem itt
+	if strings.HasPrefix(line, "@@") {
+		return nil // Whitelist-et máshol kezeljük
 	}
 
-	if strings.HasPrefix(line, "address=/") {
-		parts := strings.Split(line, "/")
-		if len(parts) >= 2 {
-			return cleanDomain(parts[1])
+	// AdGuard/uBlock format: ||domain^
+	if strings.HasPrefix(line, "||") && strings.HasSuffix(line, "^") {
+		domain := strings.TrimPrefix(line, "||")
+		domain = strings.TrimSuffix(domain, "^")
+		// URL path eltávolítása (pl. youtube.com/api/stats -> youtube.com)
+		if idx := strings.Index(domain, "/"); idx != -1 {
+			domain = domain[:idx]
 		}
+		if clean := cleanDomain(domain); clean != "" {
+			domains = append(domains, clean)
+		}
+		return domains
 	}
 
+	// AdGuard format: ||domain.com^$third-party vagy ||domain.com^$important
+	if strings.HasPrefix(line, "||") && strings.Contains(line, "^") {
+		parts := strings.SplitN(line, "^", 2)
+		if len(parts) > 0 {
+			domain := strings.TrimPrefix(parts[0], "||")
+			// URL path eltávolítása
+			if idx := strings.Index(domain, "/"); idx != -1 {
+				domain = domain[:idx]
+			}
+			if clean := cleanDomain(domain); clean != "" {
+				domains = append(domains, clean)
+			}
+		}
+		return domains
+	}
+
+	// Hosts format: 0.0.0.0 domain.com
+	// or: 127.0.0.1 domain.com
 	fields := strings.Fields(line)
 	if len(fields) >= 2 {
 		ip := fields[0]
 		if ip == "0.0.0.0" || ip == "127.0.0.1" || ip == "::1" {
-			domain := fields[1]
-			if domain == "localhost" || domain == "localhost.localdomain" || domain == "local" {
-				return ""
+			for i := 1; i < len(fields); i++ {
+				domain := fields[i]
+				if domain == "localhost" || domain == "localhost.localdomain" || domain == "local" {
+					continue
+				}
+				if clean := cleanDomain(domain); clean != "" {
+					domains = append(domains, clean)
+				}
 			}
-			return cleanDomain(domain)
+			return domains
 		}
 	}
 
+	// Simple domain list (one per line)
 	if len(fields) == 1 && net.ParseIP(fields[0]) == nil {
-		return cleanDomain(fields[0])
+		if clean := cleanDomain(fields[0]); clean != "" {
+			domains = append(domains, clean)
+		}
+		return domains
 	}
 
-	return ""
+	// DNSmasq format: address=/domain.com/0.0.0.0
+	if strings.HasPrefix(line, "address=/") {
+		parts := strings.Split(line, "/")
+		if len(parts) >= 3 {
+			domain := parts[1]
+			if clean := cleanDomain(domain); clean != "" {
+				domains = append(domains, clean)
+			}
+		}
+		return domains
+	}
+
+	// Wildcard support: *.domain.com -> domain.com
+	if strings.HasPrefix(line, "*.") {
+		domain := strings.TrimPrefix(line, "*.")
+		if clean := cleanDomain(domain); clean != "" {
+			domains = append(domains, clean)
+		}
+		return domains
+	}
+
+	return nil
+}
+
+// parseWhitelistLine parses AdGuard whitelist format: @@||domain^
+func parseWhitelistLine(line string) []string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "@@") {
+		return nil
+	}
+	
+	// Remove @@ prefix
+	line = strings.TrimPrefix(line, "@@")
+	
+	var domains []string
+	
+	// Format: @@||domain^
+	if strings.HasPrefix(line, "||") && strings.Contains(line, "^") {
+		parts := strings.SplitN(line, "^", 2)
+		if len(parts) > 0 {
+			domain := strings.TrimPrefix(parts[0], "||")
+			// URL path eltávolítása
+			if idx := strings.Index(domain, "/"); idx != -1 {
+				domain = domain[:idx]
+			}
+			if clean := cleanDomain(domain); clean != "" {
+				domains = append(domains, clean)
+			}
+		}
+	}
+	
+	return domains
 }
 
 func cleanDomain(d string) string {
 	d = strings.ToLower(d)
+	d = strings.TrimSpace(d)
 	d = strings.TrimSuffix(d, ".")
-	if len(d) < 3 || strings.Contains(d, "/") {
+	if len(d) < 2 || strings.Contains(d, "/") || strings.Contains(d, " ") {
 		return ""
 	}
 	return d
+}
+
+// IsBlocked checks if a domain is blocked (with subdomain support)
+func (m *Manager) IsBlocked(domain string) bool {
+	m.Mutex.RLock()
+	defer m.Mutex.RUnlock()
+
+	// Exact match
+	if _, ok := m.BlockMap[domain]; ok {
+		return true
+	}
+	if _, ok := m.BlacklistMap[domain]; ok {
+		return true
+	}
+
+	// Subdomain/suffix match
+	parts := strings.Split(domain, ".")
+	for i := 0; i < len(parts)-1; i++ {
+		suffix := strings.Join(parts[i:], ".")
+		if _, ok := m.BlockMap[suffix]; ok {
+			return true
+		}
+		if _, ok := m.BlacklistMap[suffix]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsWhitelisted checks if a domain is whitelisted (with subdomain support)
+func (m *Manager) IsWhitelisted(domain string) bool {
+	m.Mutex.RLock()
+	defer m.Mutex.RUnlock()
+
+	// Exact match
+	if _, ok := m.WhitelistMap[domain]; ok {
+		return true
+	}
+
+	// Subdomain/suffix match
+	parts := strings.Split(domain, ".")
+	for i := 0; i < len(parts)-1; i++ {
+		suffix := strings.Join(parts[i:], ".")
+		if _, ok := m.WhitelistMap[suffix]; ok {
+			return true
+		}
+	}
+
+	return false
 }
 EOF
 
@@ -746,21 +1198,8 @@ func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
-	blocklist.Global.Mutex.RLock()
-	_, whitelisted := blocklist.Global.WhitelistMap[name]
-	if !whitelisted {
-		for domain := range blocklist.Global.WhitelistMap {
-			if strings.HasSuffix(name, "."+domain) {
-				whitelisted = true
-				break
-			}
-		}
-	}
-	_, blacklisted := blocklist.Global.BlacklistMap[name]
-	_, blocked := blocklist.Global.BlockMap[name]
-	blocklist.Global.Mutex.RUnlock()
-
-	if whitelisted {
+	// Check whitelist first (with subdomain support)
+	if blocklist.Global.IsWhitelisted(name) {
 		forwardDNS(w, r, clientIP, "Allowed", name, qType)
 		return
 	}
@@ -776,7 +1215,8 @@ func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 		status = "Allowed (AI)"
 	}
 
-	if blacklisted || blocked {
+	// Check blacklist/blocklist (with subdomain support)
+	if blocklist.Global.IsBlocked(name) {
 		atomic.AddUint64(&CurrentStats.Blocked, 1)
 		AddLog(name, qType, clientIP, "Blocked")
 		blockDNS(w, r)
@@ -816,12 +1256,18 @@ func forwardDNS(w dns.ResponseWriter, r *dns.Msg, clientIP, status, name, qType 
 			resp, err = doHQuery(r, u)
 		} else if strings.HasPrefix(u, "tls://") {
 			uTarget := strings.TrimPrefix(u, "tls://")
+			serverName := uTarget // Eredeti hostname a TLS ellenőrzéshez
 			if !strings.Contains(uTarget, ":") {
 				uTarget += ":853"
+			} else {
+				serverName = strings.Split(uTarget, ":")[0]
 			}
 			c := new(dns.Client)
 			c.Net = "tcp-tls"
-			c.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+			c.TLSConfig = &tls.Config{
+				ServerName:         serverName,
+				InsecureSkipVerify: false, // Biztonságos: tanúsítvány ellenőrzés BE
+			}
 			c.Timeout = 2 * time.Second
 			resp, _, err = c.Exchange(r, uTarget)
 		} else {
@@ -839,6 +1285,7 @@ func forwardDNS(w dns.ResponseWriter, r *dns.Msg, clientIP, status, name, qType 
 	}
 
 	if err != nil || resp == nil {
+		log.Printf("[DNS] Hiba a forward során (%s): %v", name, err)
 		m := new(dns.Msg)
 		m.SetRcode(r, dns.RcodeServerFailure)
 		w.WriteMsg(m)
@@ -851,36 +1298,28 @@ func forwardDNS(w dns.ResponseWriter, r *dns.Msg, clientIP, status, name, qType 
 	}
 
 	if blockingOn {
-		blocklist.Global.Mutex.RLock()
+		// Check CNAME chains for hidden trackers
 		for _, rr := range resp.Answer {
 			if cname, ok := rr.(*dns.CNAME); ok {
 				target := strings.ToLower(strings.TrimSuffix(cname.Target, "."))
-				_, whitelisted := blocklist.Global.WhitelistMap[target]
-				if !whitelisted {
-					for domain := range blocklist.Global.WhitelistMap {
-						if strings.HasSuffix(target, "."+domain) {
-							whitelisted = true
-							break
-						}
-					}
+				
+				// Check whitelist for CNAME target
+				if blocklist.Global.IsWhitelisted(target) {
+					continue
 				}
 
-				if !whitelisted {
-					_, blacklisted := blocklist.Global.BlacklistMap[target]
-					_, blocked := blocklist.Global.BlockMap[target]
-					if blacklisted || blocked {
-						blocklist.Global.Mutex.RUnlock()
-						atomic.AddUint64(&CurrentStats.Blocked, 1)
-						AddLog(name, qType, clientIP, "Blocked (CNAME)")
-						blockDNS(w, r)
-						return
-					}
+				// Check blacklist/blocklist for CNAME target
+				if blocklist.Global.IsBlocked(target) {
+					atomic.AddUint64(&CurrentStats.Blocked, 1)
+					AddLog(name, qType, clientIP, "Blocked (CNAME)")
+					blockDNS(w, r)
+					return
 				}
 
+				// AI detection for CNAME target
 				if aiEnabled && agressiveAI {
 					for _, kw := range aiKeywords {
 						if strings.Contains(target, kw) {
-							blocklist.Global.Mutex.RUnlock()
 							atomic.AddUint64(&CurrentStats.AIDetected, 1)
 							atomic.AddUint64(&CurrentStats.Blocked, 1)
 							AddLog(name, qType, clientIP, "Blocked (AI CNAME)")
@@ -891,7 +1330,6 @@ func forwardDNS(w dns.ResponseWriter, r *dns.Msg, clientIP, status, name, qType 
 				}
 			}
 		}
-		blocklist.Global.Mutex.RUnlock()
 	}
 
 	AddLog(name, qType, clientIP, status)
@@ -987,6 +1425,7 @@ package webapi
 import (
 	"encoding/json"
 	"frankdnsplus/internal/blocklist"
+	"frankdnsplus/internal/cache"
 	"frankdnsplus/internal/config"
 	"frankdnsplus/internal/dnsserver"
 	"log"
@@ -994,6 +1433,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -1009,6 +1449,8 @@ func Start() {
 	http.HandleFunc("/api/config", apiConfig)
 	http.HandleFunc("/api/reset_stats", apiResetStats)
 	http.HandleFunc("/api/update_blocklists", apiUpdateBlocklists)
+	http.HandleFunc("/api/clear_cache", apiClearCache)
+	http.HandleFunc("/api/blocklist_counts", apiBlocklistCounts)
 	http.HandleFunc("/api/devices", apiDevices)
 	http.HandleFunc("/api/update_device", apiUpdateDevice)
 	http.HandleFunc("/api/delete_device", apiDeleteDevice)
@@ -1023,7 +1465,20 @@ func Start() {
 func apiStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	dnsserver.CurrentStats.NextReset = dnsserver.NextResetTime.Unix()
-	dnsserver.CurrentStats.Database = blocklist.Global.StatsDatabase
+	
+	// Calculate next blocklist update time (48 hours from last update)
+	blocklist.Global.Mutex.RLock()
+	nextUpdate := blocklist.Global.LastUpdate.Add(48 * time.Hour).Unix()
+	// Real-time database size calculation
+	dbSize := uint64(len(blocklist.Global.BlockMap))
+	blocklist.Global.Mutex.RUnlock()
+	
+	dnsserver.CurrentStats.NextBlocklistUpdate = nextUpdate
+	dnsserver.CurrentStats.Database = dbSize
+	
+	// Update the stored stats as well
+	atomic.StoreUint64(&blocklist.Global.StatsDatabase, dbSize)
+	
 	json.NewEncoder(w).Encode(dnsserver.CurrentStats)
 }
 
@@ -1071,11 +1526,54 @@ func apiResetStats(w http.ResponseWriter, r *http.Request) {
 
 func apiUpdateBlocklists(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		go blocklist.Global.Update()
-		w.Write([]byte(`{"status":"ok", "message":"Update started"}`))
+		// 1. Cache törlés ELŐBB
+		cache.Global.Clear()
+		log.Printf("[API] DNS cache törölve a frissítés előtt")
+		
+		// 2. Blocklist frissítés (szinkron)
+		blocklist.Global.Update()
+		
+		// 3. Cache újra törlés UTÁN (biztos ami biztos)
+		cache.Global.Clear()
+		
+		// Visszaadjuk az új statisztikát
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "ok",
+			"message":  "Update completed",
+			"database": blocklist.Global.StatsDatabase,
+		})
 		return
 	}
 	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+func apiClearCache(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		cache.Global.Clear()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok", "message":"Cache cleared"}`))
+		return
+	}
+	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+func apiBlocklistCounts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	blocklist.Global.Mutex.RLock()
+	counts := make(map[string]int)
+	for url, count := range blocklist.Global.ListCounts {
+		counts[url] = count
+	}
+	totalDomains := len(blocklist.Global.BlockMap)
+	blocklist.Global.Mutex.RUnlock()
+	
+	response := map[string]interface{}{
+		"counts": counts,
+		"total":  totalDomains,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 func apiDevices(w http.ResponseWriter, r *http.Request) {
@@ -1174,9 +1672,10 @@ func discoverDevices() {
 
 	foundDevices := scanARP()
 
+	// Also check DNS logs for client IPs
 	dnsserver.LogsMutex.Lock()
 	for _, l := range dnsserver.RecentLogs {
-		if l.ClientIP != "" && l.ClientIP != "127.0.0.1" {
+		if l.ClientIP != "" && l.ClientIP != "127.0.0.1" && l.ClientIP != "::1" {
 			found := false
 			for _, d := range foundDevices {
 				if d.IP == l.ClientIP {
@@ -1201,7 +1700,7 @@ func discoverDevices() {
 	}
 
 	for _, d := range foundDevices {
-		if seenIPs[d.IP] || d.IP == "127.0.0.1" || d.IP == "" {
+		if seenIPs[d.IP] || d.IP == "127.0.0.1" || d.IP == "::1" || d.IP == "" {
 			continue
 		}
 		seenIPs[d.IP] = true
@@ -1209,8 +1708,9 @@ func discoverDevices() {
 		finalName := ""
 		finalMAC := d.MAC
 
+		// 1. First priority: saved custom name (if exists and not auto-generated)
 		if saved, exists := savedMap[d.IP]; exists {
-			if saved.Name != "" && !strings.HasPrefix(saved.Name, "Device_") {
+			if saved.Name != "" && !strings.HasPrefix(saved.Name, "Device_") && !strings.HasPrefix(saved.Name, "Unknown_") {
 				finalName = saved.Name
 			}
 			if finalMAC == "" || finalMAC == "Unknown" {
@@ -1218,31 +1718,56 @@ func discoverDevices() {
 			}
 		}
 
+		// 2. Second priority: DNS reverse lookup (PTR record)
 		if finalName == "" {
 			ptrNames, err := net.LookupAddr(d.IP)
 			if err == nil && len(ptrNames) > 0 {
-				candidates := []string{}
 				for _, n := range ptrNames {
 					n = strings.TrimSuffix(n, ".")
-					if !strings.Contains(n, "in-addr.arpa") {
-						candidates = append(candidates, n)
+					if !strings.Contains(n, "in-addr.arpa") && !strings.Contains(n, "ip6.arpa") {
+						// Clean up PTR name (remove domain suffixes)
+						parts := strings.Split(n, ".")
+						if len(parts) > 0 {
+							finalName = parts[0]
+							break
+						}
 					}
-				}
-				if len(candidates) > 0 {
-					finalName = candidates[0]
 				}
 			}
-			if finalName == "" {
-				if finalMAC != "" {
-					clean := strings.ReplaceAll(finalMAC, ":", "")
-					if len(clean) > 6 {
-						finalName = "Device_" + clean[len(clean)-6:]
-					} else {
-						finalName = "Device_" + clean
+		}
+
+		// 3. Third priority: Try to get MAC from ARP if not already available
+		if finalMAC == "" {
+			cmd := exec.Command("arp", "-n", d.IP)
+			output, err := cmd.Output()
+			if err == nil {
+				lines := strings.Split(string(output), "\n")
+				for _, line := range lines {
+					parts := strings.Fields(line)
+					if len(parts) >= 3 && parts[0] == d.IP {
+						finalMAC = parts[2]
+						break
 					}
-				} else {
-					finalName = "Device_" + strings.ReplaceAll(d.IP, ".", "_")
 				}
+			}
+		}
+
+		// 4. Fourth priority: Generate name from MAC (keep existing if already has Device_ prefix)
+		if finalName == "" {
+			if saved, exists := savedMap[d.IP]; exists && saved.Name != "" {
+				// Keep existing name even if it's Device_xxx
+				finalName = saved.Name
+			} else if finalMAC != "" && finalMAC != "00:00:00:00:00:00" {
+				cleanMAC := strings.ReplaceAll(finalMAC, ":", "")
+				if len(cleanMAC) > 6 {
+					// Use last 6 chars of MAC for consistent naming
+					finalName = "Device_" + strings.ToUpper(cleanMAC[len(cleanMAC)-6:])
+				} else {
+					finalName = "Device_" + cleanMAC
+				}
+			} else {
+				// 5. Final fallback: IP-based name (stable, won't change)
+				finalName = "Device_" + strings.ReplaceAll(d.IP, ".", "_")
 			}
 		}
 
@@ -1254,6 +1779,7 @@ func discoverDevices() {
 		})
 	}
 
+	// Keep manually added devices that aren't currently online
 	for _, saved := range savedDevices {
 		if !seenIPs[saved.IP] {
 			newDevices = append(newDevices, saved)
@@ -1269,6 +1795,8 @@ func discoverDevices() {
 
 func scanARP() []config.Device {
 	devices := []config.Device{}
+	
+	// Try arp -a first (more readable format)
 	cmd := exec.Command("arp", "-a")
 	output, err := cmd.Output()
 	if err == nil {
@@ -1278,12 +1806,32 @@ func scanARP() []config.Device {
 			if len(parts) >= 4 {
 				ip := strings.Trim(parts[1], "()")
 				mac := parts[3]
-				if net.ParseIP(ip) != nil {
+				if mac != "incomplete" && net.ParseIP(ip) != nil {
 					devices = append(devices, config.Device{IP: ip, MAC: mac})
 				}
 			}
 		}
 	}
+	
+	// Fallback to ip neigh if arp -a fails
+	if len(devices) == 0 {
+		cmd = exec.Command("ip", "neigh")
+		output, err = cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				parts := strings.Fields(line)
+				if len(parts) >= 5 && parts[0] != "" {
+					ip := parts[0]
+					mac := parts[4]
+					if mac != "FAILED" && mac != "INCOMPLETE" && net.ParseIP(ip) != nil {
+						devices = append(devices, config.Device{IP: ip, MAC: mac})
+					}
+				}
+			}
+		}
+	}
+	
 	return devices
 }
 
@@ -1437,14 +1985,44 @@ cat << 'EOF' > web/index.html
                 <span id="blocklist-timer" style="font-size:0.8em; color:#666;">-- nap</span>
             </div>
             
-            <button id="update-button" class="btn" style="width:100%; margin-bottom:20px; border-color:var(--neon-green); color:var(--neon-green);" onclick="manualBlocklistUpdate()">
-                <span id="update-text">Frissítés Indítása</span>
-                <span id="update-status-container"><div id="spinner-loading" class="spinner"></div></span>
-            </button>
+            <!-- Vezérlő gombok -->
+            <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+                <button id="update-button" class="btn" style="flex:1; min-width:200px; border-color:var(--neon-green); color:var(--neon-green);" onclick="manualBlocklistUpdate()">
+                    <span id="update-text">🔄 Frissítés Indítása</span>
+                    <span id="update-status-container"><div id="spinner-loading" class="spinner"></div></span>
+                </button>
+                <button class="btn" style="border-color:var(--neon-blue); color:var(--neon-blue);" onclick="enableAllBlocklists()">✅ Összes BE</button>
+                <button class="btn" style="border-color:var(--danger); color:var(--danger);" onclick="disableAllBlocklists()">❌ Összes KI</button>
+            </div>
+            
+            <!-- Összesítő panel -->
+            <div id="blocklist-summary" style="background:linear-gradient(135deg, rgba(0,210,255,0.1), rgba(57,255,20,0.1)); border:1px solid rgba(0,210,255,0.3); border-radius:15px; padding:20px; margin-bottom:25px;">
+                <div style="display:flex; justify-content:space-around; text-align:center; flex-wrap:wrap; gap:15px;">
+                    <div>
+                        <div style="font-size:0.8em; color:#888; text-transform:uppercase;">Aktív listák</div>
+                        <div id="summary-active" style="font-size:2em; font-weight:bold; color:var(--neon-green);">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8em; color:#888; text-transform:uppercase;">Inaktív listák</div>
+                        <div id="summary-inactive" style="font-size:2em; font-weight:bold; color:var(--danger);">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8em; color:#888; text-transform:uppercase;">Összes domain</div>
+                        <div id="summary-total" style="font-size:2em; font-weight:bold; color:var(--neon-blue);">0</div>
+                    </div>
+                </div>
+            </div>
             
             <div id="blocklist-editor"></div>
+            
+            <!-- Alsó összesítő -->
+            <div id="blocklist-total-bar" style="background:#111; border:1px solid #333; border-radius:10px; padding:15px; margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:#888;">📊 Összesen betöltött domain:</span>
+                <span id="total-domains-count" style="font-size:1.5em; font-weight:bold; color:var(--neon-green);">0</span>
+            </div>
+            
             <button class="btn" style="width:100%; margin-top:15px; border-style:dashed; color:#666;" onclick="addNewBlocklist()">+ Lista hozzáadása</button>
-            <button class="btn" style="width:100%; margin-top:10px;" onclick="saveBlocklists()">Mentés</button>
+            <button class="btn" style="width:100%; margin-top:10px;" onclick="saveBlocklists()">💾 Mentés</button>
         </div>
     </div>
 
@@ -1779,7 +2357,12 @@ function showTab(id) {
     document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
     document.getElementById(id).classList.add('active');
-    event.target.classList.add('active');
+    // Find and activate the clicked button
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes("'" + id + "'")) {
+            btn.classList.add('active');
+        }
+    });
     if (id === 'devices') {
         loadDevices();
     }
@@ -1973,7 +2556,10 @@ async function loadConfig() {
         currentConfig = await safeFetch('/api/config');
         document.getElementById('txt-whitelist').value = (currentConfig.whitelist || []).join('\n');
         document.getElementById('txt-blacklist').value = (currentConfig.blacklist || []).join('\n');
-        renderBlocklistEditor();
+        
+        // Blocklist domain számok betöltése
+        await fetchBlocklistCounts();
+        
         document.getElementById('txt-upstream').value = (currentConfig.upstreams || []).join('\n');
         updateDNSButtons();
         document.getElementById('sel-mode').value = currentConfig.response_mode || 'zero';
@@ -2004,7 +2590,9 @@ function updateBlocklistCountdown() {
      if (!nextBlocklistUpdateTimestamp) return;
      let diff = nextBlocklistUpdateTimestamp - Math.floor(Date.now() / 1000);
      if (diff < 0) diff = 0;
-     document.getElementById('blocklist-timer').innerText = Math.floor(diff / 86400) + " nap";
+     const days = Math.floor(diff / 86400);
+     const hours = Math.floor((diff % 86400) / 3600);
+     document.getElementById('blocklist-timer').innerText = `${days} nap ${hours} óra`;
 }
 
 function showToast(m) {
@@ -2033,32 +2621,171 @@ function saveSettings() {
 }
 
 function manualReset() { fetch('/api/reset_stats', {method:'POST'}).then(()=>refreshData()); }
-function manualBlocklistUpdate() { fetch('/api/update_blocklists', {method:'POST'}); showToast("Frissítés indítva..."); }
+
+async function manualBlocklistUpdate() { 
+    const btn = document.getElementById('update-button');
+    const spinner = document.getElementById('spinner-loading');
+    const text = document.getElementById('update-text');
+    
+    // Disable button and show spinner
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    text.innerText = 'Frissítés folyamatban...';
+    
+    showToast("Szűrőlisták frissítése... Ez eltarthat pár percig!");
+    
+    try {
+        const response = await fetch('/api/update_blocklists', {method:'POST'});
+        const data = await response.json();
+        
+        if (data.status === 'ok') {
+            showToast(`✅ Frissítés kész! Adatbázis: ${data.database} domain`);
+            // Refresh stats immediately
+            await refreshData();
+            // Update blocklist counts
+            await fetchBlocklistCounts();
+        } else {
+            showToast("❌ Hiba a frissítés során!");
+        }
+    } catch (e) {
+        showToast("❌ Kommunikációs hiba!");
+    } finally {
+        // Re-enable button
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        text.innerText = '🔄 Frissítés Indítása';
+    }
+}
+
+// Blocklist domain számlálók tárolása
+let blocklistCounts = {};
+
+// Összes lista bekapcsolása
+function enableAllBlocklists() {
+    if (!currentConfig.blocklists) return;
+    currentConfig.blocklists.forEach((l, i) => {
+        currentConfig.blocklists[i].enabled = true;
+    });
+    renderBlocklistEditor();
+    updateBlocklistSummary();
+    showToast("✅ Összes lista bekapcsolva! Ne felejtsd el menteni!");
+}
+
+// Összes lista kikapcsolása
+function disableAllBlocklists() {
+    if (!currentConfig.blocklists) return;
+    currentConfig.blocklists.forEach((l, i) => {
+        currentConfig.blocklists[i].enabled = false;
+    });
+    renderBlocklistEditor();
+    updateBlocklistSummary();
+    showToast("❌ Összes lista kikapcsolva! Ne felejtsd el menteni!");
+}
+
+// Összesítő frissítése
+function updateBlocklistSummary() {
+    if (!currentConfig.blocklists) return;
+    
+    let activeCount = 0;
+    let inactiveCount = 0;
+    let totalDomains = 0;
+    
+    currentConfig.blocklists.forEach(l => {
+        if (l.enabled) {
+            activeCount++;
+            // Ha van tárolt domain szám ehhez a listához
+            const count = blocklistCounts[l.url] || 0;
+            totalDomains += count;
+        } else {
+            inactiveCount++;
+        }
+    });
+    
+    document.getElementById('summary-active').innerText = activeCount;
+    document.getElementById('summary-inactive').innerText = inactiveCount;
+    document.getElementById('summary-total').innerText = totalDomains.toLocaleString('hu-HU');
+    document.getElementById('total-domains-count').innerText = totalDomains.toLocaleString('hu-HU');
+}
+
+// Domain számok lekérése a szerverről
+async function fetchBlocklistCounts() {
+    try {
+        const response = await fetch('/api/blocklist_counts');
+        if (response.ok) {
+            const data = await response.json();
+            blocklistCounts = data.counts || {};
+            renderBlocklistEditor();
+            updateBlocklistSummary();
+        }
+    } catch (e) {
+        console.log("Blocklist counts not available yet");
+    }
+}
 
 function renderBlocklistEditor() {
     const c = document.getElementById('blocklist-editor');
     c.innerHTML = '';
     const lists = currentConfig.blocklists || [];
+    
     lists.forEach((l, i) => {
         const d = document.createElement('div');
         d.className = 'filter-item';
+        
+        // Domain szám lekérése (ha van)
+        const domainCount = blocklistCounts[l.url] || 0;
+        const countDisplay = domainCount > 0 
+            ? `<span style="color:var(--neon-green); font-weight:bold;">${domainCount.toLocaleString('hu-HU')}</span>` 
+            : `<span style="color:#666;">---</span>`;
+        
+        const statusColor = l.enabled ? 'var(--neon-green)' : 'var(--danger)';
+        const statusIcon = l.enabled ? '🟢' : '🔴';
+        
         d.innerHTML = `
             <div style="flex-grow: 1; margin-right: 15px;">
-                <strong style="color: #fff; display: block;">${l.name}</strong>
-                <span style="font-size: 0.8em; color: #666; display: block; word-break: break-all;">${l.url}</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                    <input type="text" style="flex:1; padding:8px; background:#222; border:1px solid #333; color:#fff; font-weight:bold;" 
+                           value="${l.name}" onchange="updateBlocklistName(${i}, this.value)">
+                    <div style="margin-left:15px; padding:5px 12px; background:rgba(0,0,0,0.5); border-radius:20px; font-size:0.85em;">
+                        📊 ${countDisplay} domain
+                    </div>
+                </div>
+                <input type="text" style="width:100%; padding:8px; background:#111; border:1px solid #222; color:#888; font-size:0.85em;" 
+                       value="${l.url}" onchange="updateBlocklistURL(${i}, this.value)">
             </div>
-            <label class="switch">
-                <input type="checkbox" ${l.enabled ? 'checked' : ''} onchange="updateBlocklistStatus(${i},this.checked)">
-                <span class="slider"></span>
-            </label>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.2em;">${statusIcon}</span>
+                <label class="switch">
+                    <input type="checkbox" ${l.enabled ? 'checked' : ''} onchange="updateBlocklistStatus(${i},this.checked); updateBlocklistSummary();">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-action" onclick="removeBlocklist(${i})" style="color:var(--danger);">🗑️</button>
+            </div>
         `;
         c.appendChild(d);
     });
+    
+    updateBlocklistSummary();
+}
+
+function updateBlocklistName(i, name) {
+    if (!currentConfig.blocklists) return;
+    currentConfig.blocklists[i].name = name;
+}
+
+function updateBlocklistURL(i, url) {
+    if (!currentConfig.blocklists) return;
+    currentConfig.blocklists[i].url = url;
 }
 
 function updateBlocklistStatus(i, e) {
     if (!currentConfig.blocklists) return;
     currentConfig.blocklists[i].enabled = e;
+}
+
+function removeBlocklist(i) {
+    if (!currentConfig.blocklists || !confirm("Törlöd ezt a szűrőlistát?")) return;
+    currentConfig.blocklists.splice(i, 1);
+    renderBlocklistEditor();
 }
 
 function addNewBlocklist() {
@@ -2175,20 +2902,29 @@ cat << 'EOF' > /usr/local/bin/frank
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${BLUE}FrankDNS+ Vezérlő${NC}"
-echo "1. Státusz"
-echo "2. Logok (Utolsó 20 sor)"
-echo "3. Újraindítás"
-echo "4. Eszközkezelő Log"
-echo "5. Kilépés"
-read -p "Válassz: " opt
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║${NC}    ${GREEN}FrankDNS+ 2026 Vezérlőpult v3.2${NC}    ${BLUE}║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+echo ""
+echo "1. 📊 Státusz"
+echo "2. 📜 Logok (Utolsó 20 sor)"
+echo "3. 🔄 Újraindítás"
+echo "4. 📱 Eszközkezelő Log"
+echo "5. 🗑️  Cache törlés"
+echo "6. 📋 Blocklist frissítés log"
+echo "7. 🚪 Kilépés"
+echo ""
+read -p "Válassz (1-7): " opt
 case $opt in
-    1) systemctl status frankdnsplus ;;
-    2) journalctl -u frankdnsplus -n 20 -f ;;
-    3) systemctl restart frankdnsplus; echo "Újraindítva!" ;;
-    4) journalctl -u frankdnsplus | grep -i "device" | tail -20 ;;
+    1) systemctl status frankdnsplus --no-pager ;;
+    2) journalctl -u frankdnsplus -n 20 --no-pager ;;
+    3) systemctl restart frankdnsplus; echo -e "${GREEN}✅ Újraindítva!${NC}" ;;
+    4) journalctl -u frankdnsplus --no-pager | grep -i "device" | tail -20 ;;
+    5) curl -s -X POST http://localhost:8000/api/clear_cache; echo -e "${GREEN}✅ Cache törölve!${NC}" ;;
+    6) journalctl -u frankdnsplus --no-pager | grep -i "blocklist" | tail -30 ;;
     *) ;;
 esac
 EOF
@@ -2198,10 +2934,16 @@ EOF
     print_block "TELEPÍTÉS KÉSZ! ✅"
     echo -e "Webes felület: ${GREEN}http://$IP_CIM:8000${NC}"
     echo ""
-    echo -e "${YELLOW}MODULÁRIS ARCHITEKTÚRA (v3.1):${NC}"
+    echo -e "${YELLOW}FRANKDNS+ v3.2.0 - MODULÁRIS ARCHITEKTÚRA:${NC}"
     echo -e "  ✓ cmd/frankdns/main.go (Orchestrator)"
     echo -e "  ✓ internal/ (Config, Cache, Blocklist, WebAPI, DNS motor)"
     echo -e "  ✓ web/ (HTML, CSS, JS - Neon dashboard)"
+    echo ""
+    echo -e "${GREEN}ÚJ FUNKCIÓK v3.2.0:${NC}"
+    echo -e "  ✓ TLS biztonság javítva"
+    echo -e "  ✓ Real-time adatbázis statisztika"
+    echo -e "  ✓ Cache automatikus törlés frissítéskor"
+    echo -e "  ✓ Részletes blocklist loggolás"
     echo ""
     read -p "Nyomj Entert a menübe való visszatéréshez..."
     show_main_menu
