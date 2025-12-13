@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # ==============================================================================
-#  FRANKDNS SUITE v5.0 - STABLE EDITION
-#  A menü teljesen újraépítve a biztos megjelenítésért.
+#  FRANKDNS SUITE v5.1 - USER FRIENDLY LIST
+#  Javítva: A lista nézegető (2-es gomb) most már egyértelműen jelzi,
+#  hogyan lépj vissza, és nem ragadsz benne az (END) képernyőn.
 # ==============================================================================
 
 # --- KONFIGURÁCIÓ ---
@@ -34,7 +35,6 @@ setup() {
         sudo chown -R $USER:$USER "$BASE_DIR"
         sudo chmod -R 755 "$BASE_DIR"
     fi
-    # Függőségek telepítése csendben
     if ! command -v jq &> /dev/null; then sudo apt-get install -y jq >/dev/null 2>&1 || true; fi
     if ! command -v dig &> /dev/null; then sudo apt-get install -y dnsutils >/dev/null 2>&1 || true; fi
 }
@@ -64,24 +64,20 @@ scrape() {
     done
 
     echo -e "${B}Takarítás...${N}"
-    # Regex domainekre
     grep -oE '([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}' "$TEMP_FILE" | sort -u > "$WORK_DIR/raw.txt"
     
-    # Szűrés (Feketelista)
+    # Szűrés
     grep -vE '\.(html|png|jpg|css|js|xml|php|ico|svg|woff)$' "$WORK_DIR/raw.txt" | \
     grep -vE '\.(length|width|height|click|push|pop|shift|join|map|filter|reduce|bind|call|apply|style|inner|outer|top|left|right|bottom)$' | \
     grep -vE '^(e\.|t\.|n\.|m\.|f\.|this\.|window\.|console\.)' | \
-    # TLD Whitelist (Csak valódi végződések)
     grep -E '\.(com|net|org|hu|eu|info|io|co|uk|de|ru|cn|biz|top|xyz|site|online|tech|store|shop)$' > "$LIST_FILE"
 
-    # Biztonsági szűrés (Forrás URL kivétele)
     source_domain=$(echo "$url" | awk -F/ '{print $3}')
     if [[ -n "$source_domain" ]]; then grep -vF "$source_domain" "$LIST_FILE" > "${LIST_FILE}.tmp" && mv "${LIST_FILE}.tmp" "$LIST_FILE"; fi
 
     count=$(wc -l < "$LIST_FILE")
     echo -e "${G}KÉSZ! $count db tiszta domain.${N}"
     
-    # Azonnali feltöltés opció
     upload_menu
 }
 
@@ -105,7 +101,6 @@ upload_menu() {
     cfg=$(curl -s "${API_URL}/config")
     curr=$(echo "$cfg" | jq -r ".$type // []")
     
-    # Gyors összefűzés
     while read -r d; do curr=$(echo "$curr" | jq --arg d "$d" '. + [$d] | unique'); done < "$LIST_FILE"
     
     new_cfg=$(echo "$cfg" | jq --argjson l "$curr" ".$type = \$l")
@@ -153,9 +148,28 @@ update_server() {
     sleep 1
 }
 
+# --- ITT A JAVÍTOTT LISTA NÉZEGETŐ ---
 view_list() {
     clear
-    if [[ -f "$LIST_FILE" ]]; then cat "$LIST_FILE" | less; else echo "Üres."; sleep 1; fi
+    if [[ -f "$LIST_FILE" ]]; then
+        count=$(wc -l < "$LIST_FILE")
+        echo -e "${C}Lista tartalma ($count db):${N}"
+        echo -e "${Y}Görgess a nyilakkal. Kilépéshez nyomd meg a 'q' betűt!${N}"
+        echo "------------------------------------------------"
+        read -rp "Nyomj ENTER-t a lista megnyitásához..."
+        
+        # Megnyitjuk a less-t
+        less "$LIST_FILE"
+        
+        # Ha kilépett a less-ből (q betűvel), akkor ide jön:
+        echo ""
+        echo "------------------------------------------------"
+        echo -e "${G}Kiléptél a listából.${N}"
+    else
+        echo -e "${R}A lista üres.${N}"
+    fi
+    # Itt a visszalépés a menübe
+    read -rp "Nyomj ENTER-t a menübe való visszalépéshez..."
 }
 
 reset_folder() {
@@ -164,11 +178,11 @@ reset_folder() {
     sleep 1
 }
 
-# --- FŐMENÜ (EGYSZERŰSÍTVE) ---
+# --- FŐMENÜ ---
 while true; do
     clear
     echo -e "${C}╔═══════════════════════════════════════╗${N}"
-    echo -e "${C}║${N}    ${W}FRANKDNS v5.0 - STABLE MENU${N}        ${C}║${N}"
+    echo -e "${C}║${N}    ${W}FRANKDNS v5.1 - STABLE MENU${N}        ${C}║${N}"
     echo -e "${C}╚═══════════════════════════════════════╝${N}"
     echo ""
     echo -e "${W}--- BÁNYÁSZAT ---${N}"
